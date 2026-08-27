@@ -1,4 +1,203 @@
 {
-  "_comment": "Curated skills reference list used for keyword matching. Add or remove entries as needed.",
-  "skills": []
+  "_comment": "Curated skill knowledge base for the Resume Information Extractor. Skills are grouped by category for maintainability. Canonical names are used as the primary key. Aliases map alternative spellings/abbreviations to the canonical name.",
+
+  "programming_languages": [
+    "C", "C++", "C#", "Java", "Python", "JavaScript", "TypeScript",
+    "Go", "Rust", "Kotlin", "Swift", "PHP", "Ruby", "Scala",
+    "R", "MATLAB", "Perl", "Shell", "Bash", "PowerShell",
+    "Dart", "Lua", "Elixir", "Haskell", "Assembly", "COBOL",
+    "Groovy", "Objective-C", "Visual Basic", "F#"
+  ],
+
+  "web_frontend": [
+    "HTML", "CSS", "HTML5", "CSS3", "SASS", "SCSS", "LESS",
+    "React", "React.js", "Angular", "Vue", "Vue.js",
+    "Next.js", "Nuxt.js", "Svelte", "jQuery",
+    "Bootstrap", "Tailwind CSS", "Material UI", "Webpack", "Vite"
+  ],
+
+  "web_backend": [
+    "Node.js", "Express.js", "Django", "Flask", "FastAPI",
+    "Spring Boot", "ASP.NET", ".NET", "Laravel",
+    "Ruby on Rails", "Gin", "Fiber", "NestJS", "Hapi.js",
+    "Tornado", "Starlette", "GraphQL", "REST API", "gRPC"
+  ],
+
+  "databases": [
+    "SQL", "MySQL", "PostgreSQL", "SQLite", "Oracle",
+    "SQL Server", "Microsoft SQL Server", "MariaDB",
+    "MongoDB", "Redis", "Cassandra", "DynamoDB",
+    "Elasticsearch", "Firebase", "CouchDB", "Neo4j",
+    "InfluxDB", "Supabase"
+  ],
+
+  "cloud": [
+    "AWS", "Amazon Web Services", "Azure", "Microsoft Azure",
+    "Google Cloud", "GCP", "Heroku", "Vercel", "Netlify",
+    "DigitalOcean", "Linode", "IBM Cloud",
+    "AWS Lambda", "EC2", "S3", "Azure DevOps"
+  ],
+
+  "devops": [
+    "Docker", "Kubernetes", "Jenkins", "Git", "GitHub",
+    "GitLab", "Bitbucket", "Ansible", "Terraform", "Chef",
+    "Puppet", "Vagrant", "CI/CD", "Linux", "Unix",
+    "Nginx", "Apache", "Helm", "Prometheus", "Grafana",
+    "Kafka", "RabbitMQ", "ArgoCD", "GitHub Actions"
+  ],
+
+  "data_science": [
+    "NumPy", "Pandas", "Matplotlib", "Seaborn", "SciPy",
+    "Plotly", "Tableau", "Power BI", "Excel",
+    "Data Analysis", "Data Visualization", "Statistical Analysis",
+    "ETL", "Apache Spark", "Apache Hadoop", "Hive", "Pig",
+    "Airflow", "dbt"
+  ],
+
+  "machine_learning": [
+    "Machine Learning", "Deep Learning", "NLP",
+    "Natural Language Processing", "Computer Vision",
+    "Scikit-learn", "TensorFlow", "PyTorch", "Keras",
+    "XGBoost", "LightGBM", "NLTK", "SpaCy", "Hugging Face",
+    "OpenCV", "Reinforcement Learning", "Neural Networks",
+    "Transfer Learning", "Object Detection"
+  ],
+
+  "mobile": [
+    "Android", "iOS", "React Native", "Flutter",
+    "SwiftUI", "Jetpack Compose", "Xamarin", "Ionic"
+  ],
+
+  "cs_fundamentals": [
+    "Data Structures", "Algorithms", "Object-Oriented Programming",
+    "Functional Programming", "Design Patterns", "System Design",
+    "Microservices", "Operating Systems", "Computer Networks",
+    "Distributed Systems", "Concurrency", "Multithreading",
+    "Agile", "Scrum", "Test-Driven Development", "Unit Testing"
+  ],
+
+  "tools_and_other": [
+    "Postman", "Swagger", "Jira", "Confluence", "Slack",
+    "VS Code", "IntelliJ IDEA", "Eclipse", "PyCharm",
+    "Jupyter", "Jupyter Notebook", "Google Colab",
+    "Maven", "Gradle", "npm", "pip", "Yarn",
+    "JSON", "XML", "YAML", "Markdown",
+    "Regex", "Linux Administration", "Bash Scripting",
+    "Cybersecurity", "Networking", "Cloud Computing",
+    "Blockchain", "Arduino", "Raspberry Pi"
+  ],
+
+  "aliases": {
+    "_comment": "Maps lower-cased alias → canonical skill name. Add aliases carefully to avoid false positives.",
+
+    "js":                       "JavaScript",
+    "javascript":               "JavaScript",
+    "typescript":               "TypeScript",
+    "ts":                       "TypeScript",
+    "py":                       "Python",
+    "python3":                  "Python",
+
+    "node.js":                  "Node.js",
+    "nodejs":                   "Node.js",
+    "node js":                  "Node.js",
+
+    "react.js":                 "React",
+    "reactjs":                  "React",
+    "react js":                 "React",
+
+    "vue.js":                   "Vue",
+    "vuejs":                    "Vue",
+    "vue js":                   "Vue",
+
+    "next.js":                  "Next.js",
+    "nextjs":                   "Next.js",
+    "next js":                  "Next.js",
+
+    "express.js":               "Express.js",
+    "expressjs":                "Express.js",
+    "express js":               "Express.js",
+
+    "c++":                      "C++",
+    "c plus plus":              "C++",
+    "cplusplus":                "C++",
+
+    "c#":                       "C#",
+    "c sharp":                  "C#",
+    "csharp":                   "C#",
+
+    ".net":                     ".NET",
+    "dotnet":                   ".NET",
+    "dot net":                  ".NET",
+
+    "asp.net":                  "ASP.NET",
+    "aspnet":                   "ASP.NET",
+
+    "spring boot":              "Spring Boot",
+    "springboot":               "Spring Boot",
+    "spring":                   "Spring Boot",
+
+    "scikit-learn":             "Scikit-learn",
+    "sklearn":                  "Scikit-learn",
+    "scikit learn":             "Scikit-learn",
+
+    "tensorflow":               "TensorFlow",
+    "pytorch":                  "PyTorch",
+
+    "ml":                       "Machine Learning",
+    "machine learning":         "Machine Learning",
+    "deep learning":            "Deep Learning",
+    "dl":                       "Deep Learning",
+    "nlp":                      "NLP",
+    "natural language processing": "NLP",
+
+    "postgresql":               "PostgreSQL",
+    "postgres":                 "PostgreSQL",
+    "mysql":                    "MySQL",
+    "sqlite":                   "SQLite",
+    "mongodb":                  "MongoDB",
+    "mongo":                    "MongoDB",
+    "redis":                    "Redis",
+
+    "aws":                      "AWS",
+    "amazon web services":      "AWS",
+    "gcp":                      "GCP",
+    "google cloud platform":    "GCP",
+    "google cloud":             "Google Cloud",
+    "azure":                    "Azure",
+    "microsoft azure":          "Azure",
+
+    "docker":                   "Docker",
+    "kubernetes":               "Kubernetes",
+    "k8s":                      "Kubernetes",
+    "git":                      "Git",
+    "github":                   "GitHub",
+    "gitlab":                   "GitLab",
+
+    "html5":                    "HTML5",
+    "css3":                     "CSS3",
+    "sass":                     "SASS",
+    "scss":                     "SCSS",
+
+    "oop":                      "Object-Oriented Programming",
+    "object oriented programming": "Object-Oriented Programming",
+    "oops":                     "Object-Oriented Programming",
+    "dsa":                      "Data Structures",
+    "data structures and algorithms": "Data Structures",
+    "ci/cd":                    "CI/CD",
+    "cicd":                     "CI/CD",
+
+    "numpy":                    "NumPy",
+    "pandas":                   "Pandas",
+    "matplotlib":               "Matplotlib",
+
+    "rest api":                 "REST API",
+    "rest apis":                "REST API",
+    "restful api":              "REST API",
+    "restful":                  "REST API",
+
+    "tdd":                      "Test-Driven Development",
+    "unit testing":             "Unit Testing",
+    "agile":                    "Agile",
+    "scrum":                    "Scrum"
+  }
 }

@@ -389,27 +389,199 @@ No field is ever omitted from the result dict, and no value is fabricated.
 
 ## 7. Skills Extraction
 
-Performed in `skills.py`:
+Performed in `skills.py` using `data/skills.json` as the knowledge base.
 
-* Load a curated list of ~200+ skills from `data/skills.json`.
-* Lowercase both the resume text and each skill.
-* Use whole-word matching (`\b<skill>\b`) to avoid false positives
-  (e.g. "R" skill not matching "React").
-* Return a deduplicated, sorted list of matched skills.
+### Why a skill dictionary is used
 
----
+A curated dictionary provides deterministic, maintainable, and explainable
+matching — no model weights, no training data, no network calls.  Adding or
+removing a skill requires editing only one JSON file.
 
-## 8. Education Extraction
+### Knowledge base structure (`data/skills.json`)
 
-Performed in `education.py`:
+Skills are organised into 11 categories for readability:
+`programming_languages`, `web_frontend`, `web_backend`, `databases`, `cloud`,
+`devops`, `data_science`, `machine_learning`, `mobile`, `cs_fundamentals`,
+`tools_and_other`.
 
-* Operate on the text block identified as the Education section.
-* Match degree keywords: B.Tech, B.E., M.Tech, MBA, B.Sc, M.Sc, Ph.D, etc.
-* Extract institution name from adjacent lines using capitalisation heuristics.
-* Extract graduation year using 4-digit year pattern (1970–2035 range).
-* Extract CGPA / percentage using numeric patterns near keywords like "CGPA", "GPA", "%".
+An `aliases` block maps alternative spellings (lower-cased) to the canonical
+form:
 
----
+```json
+"aliases": {
+  "js":         "JavaScript",
+  "nodejs":     "Node.js",
+  "c plus plus": "C++",
+  "sklearn":    "Scikit-learn",
+  "k8s":        "Kubernetes"
+}
+```
+
+### How aliases are canonicalized
+
+At module load-time, a `SkillDatabase` is built:
+1. All canonical names from every category list are indexed.
+2. The `aliases` dict is loaded: `lower(alias) → canonical`.
+3. For each skill (canonical + alias targets), a boundary-aware regex is
+   compiled and stored sorted by length descending.
+
+During matching, `resolve_alias(token)` does a O(1) dict lookup and returns
+the canonical string.
+
+### How section-aware extraction works
+
+```python
+extract_skills(text, sections={"skills": "Python, Java, Docker"})
+```
+
+If `sections["skills"]` is non-empty, only that sub-string is scanned.
+This is the preferred mode because the skills section contains intentionally
+listed skills — not incidental mentions in prose.
+
+### How fallback extraction works
+
+If no `skills` section is available, the full cleaned text is scanned using
+the same boundary-aware patterns.  Fallback is inherently less precise —
+technical words mentioned in experience narratives may be extracted — but is
+far better than returning nothing.
+
+### How boundary-aware matching prevents false positives
+
+Three tiers of matching protect against substring collisions:
+
+**Tier 1 — alias/token pass (before regex):**
+The text is split on separators (`,`, `|`, `•`, etc.) into individual tokens
+and adjacent pairs/triplets.  These are looked up in the alias map.  This
+handles `"JS"`, `"NodeJS"`, `"C plus plus"` without any regex.
+
+**Tier 2 — compiled regex with custom boundaries:**
+
+| Skill type | Pattern | Why |
+|---|---|---|
+| Strict (`C`, `R`, `Go`) | `(?<![A-Za-z0-9+#.-])SKILL(?![A-Za-z0-9+#.-])` | Prevents `C` matching in `C++`, `CSS`, `Cloud`, `Scala` |
+| Ends in `+` or `#` (`C++`, `C#`) | `(?<![A-Za-z0-9])SKILL(?![A-Za-z0-9])` | Exact literal, no word-char adjacent |
+| Contains `.` (`Node.js`, `.NET`) | `(?<![A-Za-z0-9.])SKILL(?![A-Za-z0-9.])` | Dot exclusion prevents partial URL matches |
+| Standard single/multi-word | `(?<!\w)SKILL(?!\w)` | Standard word-boundary equivalent |
+
+**Tier 3 — longest-first ordering:**
+Patterns are sorted by skill length descending.  `"Spring Boot"` is attempted
+before `"Spring"`, preventing the longer skill from being overshadowed.
+
+### How multi-word skills are handled
+
+Multi-word skills (e.g. `"Machine Learning"`, `"Spring Boot"`,
+`"Data Structures"`) are treated as atomic units in the regex and as 2- or
+3-word phrases in the token pass.  When a multi-word skill is matched, its
+component words are not additionally returned as separate skills.
+
+### How duplicates are removed
+
+A `seen_canonical` set tracks which canonical names have already been found.
+Skills appearing via both the token pass (e.g. `"JS"`) and the pattern pass
+(e.g. `"JavaScript"`) are merged into a single entry.  First occurrence wins.
+
+### Known limitations
+
+- **Out-of-vocabulary skills**: skills not in `data/skills.json` are never
+  extracted.  The dictionary must be maintained manually.
+- **Fallback mode precision**: experience narratives mentioning technologies
+  may produce skill results not intended by the candidate.
+- **Uncommon aliases**: only aliases listed in the `aliases` block are
+  resolved; creative abbreviations (e.g. `"PG"` for PostgreSQL) will be missed.
+- **Non-English resumes**: skill names in other languages are not covered.
+
+Performed in `education.py`.  ✅ Implemented
+
+### Section-aware extraction
+
+If `sections["education"]` is present and non-empty, only that text is
+scanned.  This isolates education content from the rest of the resume and
+significantly reduces false positives.  Fallback to the full text is
+performed only when no education section is available.
+
+### Degree pattern matching
+
+A list `_DEGREE_PATTERNS` contains 30+ patterns covering doctoral, master's,
+bachelor's, diploma, and secondary degrees.  All patterns use:
+- **Negative lookbehind/lookahead on letters** (`(?<![A-Za-z])…(?![A-Za-z])`)
+  so abbreviations like `M.E.` cannot match inside `"resume"`.
+- Case-insensitive matching (`re.IGNORECASE`).
+
+Examples of recognised forms:
+`Ph.D.`, `M.Tech`, `MBA`, `B.Tech`, `B.Sc`, `BCA`, `Diploma`, `HSC`, `SSC`,
+`12th`, `Bachelor of Technology`, `Master of Science`.
+
+### Field-of-study extraction
+
+After a degree token is matched, the remainder of the line is inspected for
+a field-of-study separator pattern (`in <X>`, `- <X>`, `(<X>)`, `, <X>`).
+The captured text becomes both `field_of_study` and is appended to the
+`degree` string for readability (e.g. `"B.Tech in Computer Engineering"`).
+
+### Institution identification
+
+Lines that do not match any other category (degree / date / grade / skip list)
+and pass a five-condition filter are treated as institution candidates:
+
+1. Non-empty, 3–120 chars.
+2. Does not match a skip-list word (CGPA, Percentage, Email, etc.).
+3. Does not match the grade regex.
+4. Is not a date-only line.
+5. Has ≤ 8 words and ≥ 45% alphabetic characters.
+
+When multiple candidates exist, they are ranked by a confidence score that
+rewards institution-keyword presence (`university`, `college`, `institute`,
+`polytechnic`, etc.) and title-case word formatting.
+
+### Entry grouping
+
+The section text is split into groups using a degree-boundary strategy:
+a new group is started whenever a degree pattern is found and the current
+group already contains a degree.  Each group is then parsed independently
+by `_parse_group`.
+
+A secondary inline parser (`_try_parse_inline`) handles single-line or
+comma/pipe-separated formats such as:
+- `"B.Tech | Computer Engineering | ABC University | 2023-2027"`
+- `"M.Tech — Data Science — IIT Delhi — 2022-2024"`
+
+### Date extraction
+
+Date spans such as `2023 - 2027`, `Aug 2022 - May 2024`, and `2023 - Present`
+are matched by `_DATE_SPAN_RE`.  Single years (1950–2035) serve as a fallback.
+Date-only lines are identified first and skipped for other field extraction to
+prevent years from being misclassified as institutions or grades.
+
+### Grade extraction
+
+Explicit grade lines (`CGPA: 9.2`, `GPA: 3.8/4.0`, `Percentage: 91%`,
+bare `92.5%`) are matched by `_GRADE_RE` and stored verbatim.
+
+### Conservative validity filtering
+
+A record is only included if:
+- Its `degree` field is non-None and at least 3 characters long.
+
+Institution-only records (where `degree=None`) are discarded — they would
+create false positives from plain sentences in fallback mode.
+
+### Duplicate handling
+
+Records are de-duplicated by a `(lower(degree), lower(institution))` key.
+First occurrence in document order wins.
+
+### Known limitations
+
+- **Institution-without-keyword**: institutions whose names contain no
+  standard keyword (University, College, etc.) may occasionally be missed.
+- **Unusual abbreviations**: degree abbreviations not in `_DEGREE_PATTERNS`
+  will be missed.
+- **Multi-column PDF layouts**: text extraction order may mismatch the visual
+  layout, confusing the line-grouping heuristic.
+- **Degree-only entries**: records where the institution is completely absent
+  will have `institution=None`.
+- **Fallback precision**: education-like phrases in project or experience
+  descriptions may be incorrectly extracted in fallback mode.
 
 ## 9. Work Experience Extraction
 
