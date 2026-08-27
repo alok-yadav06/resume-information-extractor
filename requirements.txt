@@ -7,3 +7,6 @@ streamlit==1.62.0        # Interactive browser-based frontend
 
 # Utilities (already pulled in by the above, listed for explicitness)
 lxml==6.1.2              # XML/HTML backbone used by python-docx
+
+# Development / Testing (not required to run the application)
+pytest==8.3.5            # Test runner for unit tests under tests/

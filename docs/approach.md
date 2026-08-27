@@ -63,23 +63,82 @@ Each module has a single responsibility and can be tested independently.
 
 ---
 
-## 3. PDF / DOCX Parsing
+## 3. PDF / DOCX Parsing  ✅ Implemented
+
+`extractor/parser.py` is the first and only stage that touches the actual file.
+Its sole responsibility is converting a binary file into a plain-text string.
+
+### Why a separate parser module?
+
+Keeping file I/O and format-specific decoding completely isolated from pattern
+matching and field extraction means:
+- Each concern can be unit-tested independently (no real resumes needed).
+- Swapping or extending a parser (e.g. adding ODT support) requires touching
+  only this one file.
+- The rest of the pipeline only ever sees clean strings — no fitz or docx objects.
+
+### Input handling
+
+The module defines a `FileSource` type alias covering three input forms:
+- A filesystem path (`str` or `Path`) — useful for CLI and tests.
+- Raw `bytes` — useful for in-memory fixture creation in tests.
+- A binary file-like object (`io.IOBase`) — useful for Streamlit's
+  `UploadedFile`, `io.BytesIO`, or any stream.
+
+An internal `_to_bytes(source)` helper normalises all three into raw bytes,
+so the PDF and DOCX parsers share a single, clean code path.
 
 ### PDF — PyMuPDF (`fitz`)
 
-* Open the PDF using `fitz.open()`.
-* Iterate over all pages and extract text blocks using `page.get_text("text")`.
-* Concatenate page text with newline separators.
-* Preserves reading order as rendered by the PDF engine.
+```python
+doc = fitz.open(stream=raw_bytes, filetype="pdf")
+for page_index in range(len(doc)):
+    page = doc.load_page(page_index)
+    page_text = page.get_text("text")   # reading-order, plain text
+```
+
+- `fitz.open(stream=..., filetype="pdf")` avoids writing a temporary file to
+  disk, keeping parsing entirely in-memory.
+- `get_text("text")` preserves left-to-right, top-to-bottom reading order.
+- Pages are joined with `"\f\n"` (form-feed + newline) so callers can detect
+  page boundaries if needed.
+- A `ParserError` is raised if the file is corrupt, password-protected, or if
+  no selectable text is found (e.g. scanned image PDFs).
 
 ### DOCX — python-docx
 
-* Load the document with `Document(path)`.
-* Iterate over `document.paragraphs` and collect `.text` from each paragraph.
-* Tables inside DOCX files will also be traversed row-by-row.
-* Concatenate with newline separators.
+```python
+doc = Document(io.BytesIO(raw_bytes))
+for para in doc.paragraphs:
+    lines.append(para.text.strip())
+for table in doc.tables:
+    for row in table.rows:
+        lines.append("  |  ".join(cell.text.strip() for cell in row.cells))
+```
 
-**Output**: a single plain-text string representing the full resume.
+- Both body paragraphs **and table cells** are extracted, because many resumes
+  use tables to lay out skills, contact info, or education entries.
+- Table rows are joined with `" | "` so the cell values remain readable and
+  searchable without merging into a single word.
+- A `ParserError` is raised on invalid or empty files.
+
+### Unified entry point — `extract_text(source, filename)`
+
+```python
+ext = _detect_extension(source, filename)   # ".pdf" or ".docx"
+if ext == ".pdf":  return extract_text_from_pdf(source)
+if ext == ".docx": return extract_text_from_docx(source)
+raise ParserError("Unsupported file format …")
+```
+
+- Format detection is case-insensitive (`.PDF`, `.Docx` all work).
+- The `filename` parameter is the hook for Streamlit integration:
+  `extract_text(uploaded_file, filename=uploaded_file.name)`.
+- Unsupported extensions (`.txt`, `.doc`, `.rtf`, …) raise an informative
+  `ParserError` immediately — no silent failures.
+
+**Output**: a single plain-text `str` representing the full resume, ready to
+be passed to `cleaner.py`.
 
 ---
 
