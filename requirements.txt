@@ -1,0 +1,9 @@
+# Core parsing libraries
+pymupdf==1.28.2          # PDF text extraction via PyMuPDF (fitz)
+python-docx==1.2.0       # DOCX parsing
+
+# Web UI
+streamlit==1.62.0        # Interactive browser-based frontend
+
+# Utilities (already pulled in by the above, listed for explicitness)
+lxml==6.1.2              # XML/HTML backbone used by python-docx
