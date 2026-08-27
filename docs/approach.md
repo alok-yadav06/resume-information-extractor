@@ -208,28 +208,92 @@ text = text.strip()
 
 **Output**: a normalised `str` passed to `sections.py` for section detection.
 
-## 5. Section Detection
+## 5. Section Detection  ✅ Implemented
 
-Performed in `sections.py`:
+`extractor/sections.py` is the third pipeline stage.  It receives normalised
+text from the cleaner and returns a `dict[str, str]` that maps canonical
+section names to their body text.
 
-* Define a dictionary of section keywords:
-  ```
-  SECTION_KEYWORDS = {
-      "education":   ["education", "academic", "qualification"],
-      "experience":  ["experience", "employment", "work history", "career"],
-      "skills":      ["skills", "technical skills", "core competencies"],
-      "projects":    ["projects", "personal projects"],
-      "contact":     ["contact", "personal details"],
-      ...
-  }
-  ```
-* Scan each line; if it matches a keyword (case-insensitive, stripped), mark it as a
-  section heading.
-* Build a dictionary mapping section names → text blocks between headings.
+### Why section detection is useful
 
-**Output**: `dict[str, str]` — section name to raw section text.
+Extraction modules (skills, education, experience) produce far better results
+when they operate on a focused sub-string rather than the entire document.
+For example, a date-range in a *certification* block should not be confused
+with work experience.  Isolating sections first makes every later rule simpler
+and more precise.
 
----
+### How aliases are handled
+
+The module maintains a single flat dictionary `SECTION_ALIASES` that maps
+every known heading variant (lower-cased) to a canonical name:
+
+```python
+SECTION_ALIASES = {
+    "skills":               "skills",
+    "technical skills":     "skills",
+    "core competencies":    "skills",
+    "technologies & tools": "skills",
+    # ... 100+ entries covering 10+ canonical sections
+}
+```
+
+Benefits of this design:
+- Adding a new alias requires editing only the dictionary — no logic changes.
+- The lookup is O(1) (frozenset membership test).
+- All 10 canonical sections (`summary`, `objective`, `skills`, `education`,
+  `experience`, `projects`, `certifications`, `achievements`, `languages`,
+  `interests`) are supported.
+
+### How section boundaries are identified
+
+The detector makes **two passes** over the lines of the document:
+
+**Pass 1 — classify lines as headings or body:**
+For every line, `_is_heading(line)` applies four rules:
+1. The stripped line is non-empty.
+2. The raw line is ≤ 60 characters (avoids treating prose sentences as headings).
+3. After stripping trailing `:`, `–`, `—`, `.`, etc. and lower-casing, the line
+   exists in `SECTION_ALIASES`.
+4. The normalised line does **not** contain sentence-indicator words
+   (`the`, `a`, `an`, `with`, `have`, `my`, `in`, `of`, etc.) — this prevents
+   `"I have experience in Python"` from being classified as an experience heading.
+
+**Pass 2 — slice body text:**
+Heading positions are collected as `[(line_index, canonical_name), ...]`.
+For each consecutive pair, the lines between them form the section body.
+The final heading captures all remaining lines to the end of the document.
+
+### How false positives are reduced
+
+Two complementary guards work together:
+
+| Guard | What it prevents |
+|---|---|
+| Length limit (60 chars) | Long sentences containing keyword words |
+| Sentence-indicator words | Short sentences like "I have experience in Java" |
+
+Because matching is **exact** (the whole normalised line must equal a known
+alias), words like "experience" or "skills" appearing anywhere inside a body
+sentence never trigger a false heading match.
+
+### How duplicate sections are handled
+
+If two headings resolve to the same canonical name (e.g. "SKILLS" and
+"TECHNICAL SKILLS" both → `"skills"`), their body blocks are **appended** in
+document order, separated by a blank line:
+
+```python
+# Simplified
+if canonical in sections:
+    sections[canonical].append(body_text)   # combine
+else:
+    sections[canonical] = [body_text]       # first occurrence
+```
+
+The caller always receives a single string per canonical key.
+
+**Output**: `dict[str, str]` — only sections that were actually detected are
+included; missing sections are omitted rather than set to `None` or `""`.
 
 ## 6. Regex Extraction
 
