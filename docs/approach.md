@@ -142,19 +142,71 @@ be passed to `cleaner.py`.
 
 ---
 
-## 4. Text Cleaning
+## 4. Text Cleaning  ✅ Implemented
 
-Performed in `cleaner.py`:
+`extractor/cleaner.py` is the second stage of the pipeline.  It receives the
+raw string from the parser and returns a consistently formatted string that all
+downstream modules can rely on.
 
-* Replace non-breaking spaces (`\u00a0`) and other Unicode whitespace with standard spaces.
-* Collapse multiple consecutive blank lines into a single blank line.
-* Strip leading/trailing whitespace from every line.
-* Remove null bytes and other control characters.
-* Normalise Unicode to NFC form to unify accented characters.
+### Why normalisation is necessary
 
-**Output**: clean, normalised multi-line string ready for pattern matching.
+PDF and DOCX parsers are format converters, not text cleaners.  Their output
+commonly contains:
+- Windows-style `\r\n` and old Mac-style `\r` line endings mixed with `\n`.
+- Non-breaking spaces (`\u00a0`) and other Unicode whitespace variants that
+  look like spaces but break regex word-boundary matching.
+- Runs of multiple spaces from columnar PDF layouts ("John     Doe").
+- Three, four, or five consecutive blank lines from page headers/footers.
+- Null bytes, form feeds, and other invisible control characters.
+- Composite Unicode characters that may not match their precomposed equivalents.
 
----
+Without normalisation, a simple email regex can fail because the text contains
+`\u00a0` instead of a space next to the address.
+
+### The 8-step cleaning pipeline
+
+Steps are applied in order — each step's output feeds the next:
+
+| Step | What it does |
+|---|---|
+| 1. Unicode NFC | Unifies accented / composite characters (é vs e + ́) |
+| 2. Special whitespace | Replaces `\u00a0`, `\u2009`, BOM, etc. with plain spaces |
+| 3. Control-char removal | Strips invisible bytes; keeps `\n` and `\t` |
+| 4. Line-ending unification | `\r\n`, `\r` → `\n`; `\f` (PDF page break) → `\n\n` |
+| 5. Per-line strip | Removes leading/trailing spaces from every line individually |
+| 6. Intra-line whitespace collapse | `"John     Doe"` → `"John Doe"` |
+| 7. Blank-line reduction | Three or more consecutive `\n` → two `\n` (one visible gap) |
+| 8. Document-level strip | Removes leading/trailing whitespace from the whole output |
+
+```python
+# Simplified view of the pipeline
+text = _normalise_unicode(text)
+text = _replace_special_whitespace(text)
+text = _remove_control_characters(text)
+text = _normalise_line_endings(text)
+text = _strip_lines(text)
+text = _collapse_intra_line_whitespace(text)
+text = _reduce_blank_lines(text)
+text = text.strip()
+```
+
+### What is intentionally preserved
+
+| Preserved | Reason |
+|---|---|
+| Original casing | Name detection and degree matching depend on capitalisation |
+| Punctuation (`.`, `@`, `+`, `-`, `/`, `#`) | Email, URL, phone, C++, Node.js, B.Tech |
+| Newlines | Section structure depends on line boundaries |
+| Single blank lines | Visual separator between resume sections |
+| Duplicate lines | May be meaningful (skill listed under multiple sections) |
+
+### Safety
+
+- Passing a non-`str` argument raises `TypeError` immediately.
+- Empty or whitespace-only input returns `""` without error.
+- The function is **idempotent**: `clean_text(clean_text(x)) == clean_text(x)`.
+
+**Output**: a normalised `str` passed to `sections.py` for section detection.
 
 ## 5. Section Detection
 
