@@ -295,20 +295,97 @@ The caller always receives a single string per canonical key.
 **Output**: `dict[str, str]` — only sections that were actually detected are
 included; missing sections are omitted rather than set to `None` or `""`.
 
-## 6. Regex Extraction
+## 6. Contact Information Extraction  ✅ Implemented
 
-Performed in `contact.py`:
+`extractor/contact.py` extracts three mandatory fields from the full cleaned
+text: **name**, **email**, and **phone**.  All extraction is deterministic —
+no ML, no network calls, no external services.
 
-| Field | Pattern Strategy |
+### Email extraction (regex-based)
+
+```
+[a-zA-Z0-9][a-zA-Z0-9._%+-]*  @  domain.tld
+```
+
+- The pattern anchors with a negative lookbehind (`(?<![.\w])`) so partial
+  matches mid-word are rejected.
+- A positive lookahead ensures the match ends before a non-alphanumeric
+  character, which avoids including trailing sentence punctuation.
+- A post-match strip pass then removes any remaining `. , ; )` chars at the
+  tail (handles edge cases like `"john@example.com."`).
+- The result is lower-cased for consistency.
+- If multiple emails exist, the **first** match in document order is returned.
+- Label prefixes (`"Email: …"`, `"E-mail: …"`) are handled because the regex
+  searches the whole line after the label has been stripped by a separate
+  helper.
+
+### Phone extraction (regex + validation)
+
+The regex matches:
+- Optional country code: `+91`, `+1`, `91`, etc.
+- Optional parenthesised area code: `(022)`.
+- 7–17 character core digit sequence with spaces, hyphens, or dots as
+  separators.
+
+After the regex finds a candidate, three validation checks filter it:
+
+| Check | Rejects |
 |---|---|
-| **Email** | Standard RFC-5321 local-part + domain regex |
-| **Phone** | Flexible pattern covering `+91`, country codes, dashes, spaces, dots, parentheses |
-| **LinkedIn** | URL pattern matching `linkedin.com/in/<handle>` |
-| **GitHub** | URL pattern matching `github.com/<handle>` |
+| ≥ 7 digits in the match | PIN codes, short IDs |
+| Not a 4-digit number in range 1900–2099 | Standalone years (2020, 2024) |
+| Next character is not `%` or `/` | Percentages, fractions |
 
-All patterns use `re.IGNORECASE` and `re.MULTILINE`.
+Contact-label prefixes (`"Phone: …"`, `"Mobile: …"`) are stripped per-line
+before the regex runs.
 
----
+### Name extraction (conservative heuristic)
+
+Name extraction has no reliable universal regex — it uses a layered filter
+applied to the first **12 non-empty lines** of the document:
+
+| Filter | What it rejects |
+|---|---|
+| Contains `@` | Email addresses |
+| Contains URL pattern | LinkedIn, GitHub, website links |
+| Matches contact-label prefix | `"Phone:"`, `"LinkedIn:"`, etc. |
+| Token is a known section-heading word | SKILLS, EDUCATION, EXPERIENCE … |
+| Token is a job-title word | engineer, developer, analyst, manager … |
+| `< 60 %` alphabetic chars | Numeric-heavy lines (phone, years) |
+| `> 50` characters | Long prose lines |
+| `< 2` tokens | Single-word lines (skill names, etc.) |
+| `> 5` tokens | Very long multi-word phrases |
+
+The **first line** that passes all nine filters is accepted as the name.
+It is returned **title-cased** (`"ALICE JOHNSON"` → `"Alice Johnson"`).
+
+### Why name extraction is less deterministic than email
+
+Email addresses have a globally unique syntactic marker (`@`).  Phone numbers
+have a recognisable digit density.  Names have neither — they are arbitrary
+strings of alphabetic tokens.  The heuristic approach above is conservative:
+it prefers returning `None` over guessing incorrectly.
+
+### How false positives are reduced
+
+| Scenario | Guard |
+|---|---|
+| `"2024"` extracted as phone | Digit count < 7, and 4-digit year range check |
+| `"95%"` extracted as phone | Next-character `%` check |
+| `"Software Engineer"` as name | Job-title keyword filter |
+| `"SKILLS"` as name | Section-heading keyword filter |
+| `"john@example.com."` (trailing dot) | Email post-match strip |
+| Sentence containing "experience" | Length + sentence-indicator guards in `sections.py` |
+
+### Missing fields
+
+A field that cannot be confidently extracted is returned as Python `None`.
+The caller always receives all three keys:
+
+```python
+{"name": None, "email": None, "phone": None}
+```
+
+No field is ever omitted from the result dict, and no value is fabricated.
 
 ## 7. Skills Extraction
 
