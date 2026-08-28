@@ -15,9 +15,12 @@ Supported formats
 
 Public API
 ----------
-extract_text_from_pdf(source)  -> str
-extract_text_from_docx(source) -> str
-extract_text(source, filename) -> str
+extract_text_from_pdf(source)         -> str
+extract_text_from_docx(source)        -> str
+extract_text(source, filename)        -> str
+extract_hyperlinks_from_pdf(source)   -> list[str]
+extract_hyperlinks_from_docx(source)  -> list[str]
+extract_hyperlinks(source, filename)  -> list[str]
 """
 
 from __future__ import annotations
@@ -176,6 +179,53 @@ def extract_text_from_pdf(source: FileSource) -> str:
     return "\f\n".join(pages_text)
 
 
+def extract_hyperlinks_from_pdf(source: FileSource) -> list[str]:
+    """
+    Extract all HTTP/HTTPS hyperlink annotation targets from a PDF.
+
+    Many PDF resumes embed profile URLs as clickable hyperlink annotations while
+    showing only a visible label such as "LinkedIn" or "GitHub".  This function
+    extracts those embedded URIs so that profile detection can find them even
+    when the URL does not appear in the raw extracted text.
+
+    Parameters
+    ----------
+    source:
+        A filesystem path, raw bytes, or a binary file-like object pointing to
+        a PDF file.
+
+    Returns
+    -------
+    list[str]
+        De-duplicated list of HTTP/HTTPS URIs found in PDF link annotations.
+        Returns an empty list if no hyperlinks are present or if the document
+        cannot be opened (no exception is raised for non-PDF sources here).
+    """
+    try:
+        raw = _to_bytes(source)
+        doc = fitz.open(stream=raw, filetype="pdf")
+    except Exception:
+        return []
+
+    seen: set[str] = set()
+    urls: list[str] = []
+
+    try:
+        for page_index in range(len(doc)):
+            page = doc.load_page(page_index)
+            for link in page.get_links():
+                uri = link.get("uri", "")
+                if uri and uri.lower().startswith(("http://", "https://")):
+                    uri_clean = uri.strip().rstrip("/")
+                    if uri_clean not in seen:
+                        seen.add(uri_clean)
+                        urls.append(uri_clean)
+    finally:
+        doc.close()
+
+    return urls
+
+
 # ---------------------------------------------------------------------------
 # DOCX parser
 # ---------------------------------------------------------------------------
@@ -245,6 +295,55 @@ def extract_text_from_docx(source: FileSource) -> str:
     return "\n".join(lines)
 
 
+def extract_hyperlinks_from_docx(source: FileSource) -> list[str]:
+    """
+    Extract all HTTP/HTTPS hyperlink targets from a DOCX file.
+
+    DOCX stores external hyperlinks as relationships in the document part.
+    This function reads the relationship table and collects external HTTP/HTTPS
+    URIs without making any network requests.
+
+    Parameters
+    ----------
+    source:
+        A filesystem path, raw bytes, or a binary file-like object pointing to
+        a valid ``.docx`` file.
+
+    Returns
+    -------
+    list[str]
+        De-duplicated list of HTTP/HTTPS URLs found in DOCX hyperlink
+        relationships.  Returns an empty list on parse failure.
+    """
+    try:
+        raw = _to_bytes(source)
+        buffer = io.BytesIO(raw)
+        doc = Document(buffer)
+    except Exception:
+        return []
+
+    _HYPERLINK_RELTYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    )
+
+    seen: set[str] = set()
+    urls: list[str] = []
+
+    try:
+        for _rel_id, rel in doc.part.rels.items():
+            if rel.reltype == _HYPERLINK_RELTYPE:
+                uri = rel.target_ref
+                if uri and uri.lower().startswith(("http://", "https://")):
+                    uri_clean = uri.strip().rstrip("/")
+                    if uri_clean not in seen:
+                        seen.add(uri_clean)
+                        urls.append(uri_clean)
+    except Exception:
+        pass
+
+    return urls
+
+
 # ---------------------------------------------------------------------------
 # Unified entry point
 # ---------------------------------------------------------------------------
@@ -302,3 +401,35 @@ def extract_text(
         f"Unsupported file format '{ext}'. "
         "Please upload a PDF or DOCX resume."
     )
+
+
+def extract_hyperlinks(
+    source: FileSource,
+    filename: str | None = None,
+) -> list[str]:
+    """
+    Extract embedded HTTP/HTTPS hyperlink targets from a PDF or DOCX resume.
+
+    Parameters
+    ----------
+    source:
+        A filesystem path, raw bytes, or a binary file-like object.
+    filename:
+        Optional original filename for format detection.
+
+    Returns
+    -------
+    list[str]
+        De-duplicated list of HTTP/HTTPS URLs found in embedded link
+        annotations.  Returns an empty list for unsupported formats or when
+        no links are present.
+    """
+    ext = _detect_extension(source, filename)
+
+    if ext == ".pdf":
+        return extract_hyperlinks_from_pdf(source)
+
+    if ext == ".docx":
+        return extract_hyperlinks_from_docx(source)
+
+    return []

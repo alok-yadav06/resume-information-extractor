@@ -218,3 +218,91 @@ charlie@example.com
 """
         profiles = extract_profiles(header)
         assert profiles == {"linkedin": None, "github": None}
+
+
+# ===========================================================================
+# 6. extra_urls (Hyperlink Annotation) Tests
+# ===========================================================================
+
+class TestExtraUrls:
+    """Tests for profile detection via embedded hyperlink annotation URLs."""
+
+    def test_linkedin_from_extra_urls_only(self):
+        """LinkedIn URL in extra_urls is detected when absent from text."""
+        result = extract_linkedin(
+            "Alice Smith | alice@example.com",
+            extra_urls=["https://www.linkedin.com/in/alice-smith"],
+        )
+        assert result == "https://www.linkedin.com/in/alice-smith"
+
+    def test_github_from_extra_urls_only(self):
+        """GitHub profile in extra_urls is detected when absent from text."""
+        result = extract_github(
+            "Bob Jones | bob@example.com",
+            extra_urls=["https://github.com/bobjones"],
+        )
+        assert result == "https://github.com/bobjones"
+
+    def test_extra_urls_takes_priority_over_text(self):
+        """URL in extra_urls wins over a different URL in the visible text."""
+        text = "GitHub: https://github.com/old-account"
+        result = extract_github(
+            text,
+            extra_urls=["https://github.com/new-account"],
+        )
+        # extra_urls is checked first, so the annotation target wins
+        assert result == "https://github.com/new-account"
+
+    def test_extract_profiles_with_extra_urls(self):
+        """extract_profiles() passes extra_urls to both sub-extractors."""
+        profiles = extract_profiles(
+            "Jane Doe | jane@example.com",
+            extra_urls=[
+                "https://linkedin.com/in/janedoe",
+                "https://github.com/janedoe99",
+            ],
+        )
+        assert profiles["linkedin"] == "https://linkedin.com/in/janedoe"
+        assert profiles["github"] == "https://github.com/janedoe99"
+
+    def test_extra_urls_none_falls_back_to_text(self):
+        """Passing extra_urls=None falls back to text-based extraction."""
+        text = "GitHub: github.com/testuser"
+        result = extract_github(text, extra_urls=None)
+        assert result == "https://github.com/testuser"
+
+    def test_extra_urls_empty_list_falls_back_to_text(self):
+        """An empty extra_urls list falls back to text-based extraction."""
+        text = "linkedin.com/in/jsmith"
+        result = extract_linkedin(text, extra_urls=[])
+        assert result == "https://linkedin.com/in/jsmith"
+
+    def test_extra_urls_github_repo_url_excluded(self):
+        """A deep repository URL in extra_urls should not match as a profile."""
+        result = extract_github(
+            "No GitHub in text",
+            extra_urls=["https://github.com/user/some-repo/blob/main/README.md"],
+        )
+        # Deep repo path — should not be returned as profile
+        assert result is None
+
+    def test_extra_urls_linkedin_invalid_slug_excluded(self):
+        """A bare linkedin.com/in/ with no slug should not match."""
+        result = extract_linkedin(
+            "No LinkedIn in text",
+            extra_urls=["https://linkedin.com/in/"],
+        )
+        assert result is None
+
+    def test_extra_urls_non_profile_urls_skipped(self):
+        """Non-profile URLs in extra_urls are skipped without raising."""
+        result = extract_profiles(
+            "No profiles",
+            extra_urls=[
+                "https://www.example.com/page",
+                "https://medium.com/@writer",
+            ],
+        )
+        assert result["linkedin"] is None
+        assert result["github"] is None
+

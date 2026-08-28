@@ -17,9 +17,9 @@ Design overview
 
 Public API
 ----------
-extract_profiles(text: str) -> dict[str, str | None]
-extract_linkedin(text: str) -> str | None
-extract_github(text: str)   -> str | None
+extract_profiles(text: str, extra_urls: list[str] | None = None) -> dict[str, str | None]
+extract_linkedin(text: str, extra_urls: list[str] | None = None) -> str | None
+extract_github(text: str, extra_urls: list[str] | None = None)   -> str | None
 """
 
 from __future__ import annotations
@@ -92,9 +92,9 @@ def _normalize_scheme(url: str) -> str:
 # LinkedIn Extractor
 # ---------------------------------------------------------------------------
 
-def extract_linkedin(text: str) -> str | None:
+def extract_linkedin(text: str, extra_urls: list[str] | None = None) -> str | None:
     """
-    Extract the primary LinkedIn profile URL from *text*.
+    Extract the primary LinkedIn profile URL from *text* or *extra_urls*.
 
     Recognises formats such as:
     - https://www.linkedin.com/in/johndoe
@@ -103,6 +103,16 @@ def extract_linkedin(text: str) -> str | None:
     - linkedin.com/in/johndoe
     - LinkedIn: https://linkedin.com/in/johndoe
 
+    Parameters
+    ----------
+    text:
+        Cleaned resume text (from PDF/DOCX text extraction).
+    extra_urls:
+        Optional list of HTTP/HTTPS URLs embedded as hyperlink annotations in
+        the source document (from ``parser.extract_hyperlinks()``).  These are
+        checked *first* because annotation targets are more reliable than
+        text-scraped URLs.
+
     Returns
     -------
     str | None
@@ -110,6 +120,15 @@ def extract_linkedin(text: str) -> str | None:
     """
     if not isinstance(text, str):
         raise TypeError(f"extract_linkedin expects a str, got {type(text).__name__!r}.")
+
+    # --- Pass 0: Check embedded hyperlink annotation targets first -----------
+    if extra_urls:
+        for url in extra_urls:
+            m = _LINKEDIN_URL_RE.match(url)
+            if m:
+                slug = m.group(1).strip()
+                if slug and len(slug) >= 2 and slug.lower() not in ("in", "profile", "user"):
+                    return _normalize_scheme(url)
 
     if not text.strip():
         return None
@@ -140,9 +159,9 @@ def extract_linkedin(text: str) -> str | None:
 # GitHub Extractor
 # ---------------------------------------------------------------------------
 
-def extract_github(text: str) -> str | None:
+def extract_github(text: str, extra_urls: list[str] | None = None) -> str | None:
     """
-    Extract the primary GitHub profile URL from *text*.
+    Extract the primary GitHub profile URL from *text* or *extra_urls*.
 
     Recognises formats such as:
     - https://github.com/johndoe
@@ -153,6 +172,14 @@ def extract_github(text: str) -> str | None:
 
     Distinguishes profile URLs from deep repository URLs (e.g. github.com/user/repo).
 
+    Parameters
+    ----------
+    text:
+        Cleaned resume text.
+    extra_urls:
+        Optional list of HTTP/HTTPS URLs from embedded hyperlink annotations.
+        Profile-shaped URLs here are returned immediately (Pass 0).
+
     Returns
     -------
     str | None
@@ -160,6 +187,19 @@ def extract_github(text: str) -> str | None:
     """
     if not isinstance(text, str):
         raise TypeError(f"extract_github expects a str, got {type(text).__name__!r}.")
+
+    # --- Pass 0: Check embedded hyperlink annotation targets first -----------
+    if extra_urls:
+        for url in extra_urls:
+            m = _GITHUB_URL_RE.match(url)
+            if m:
+                username = m.group(1).strip()
+                if username and len(username) >= 2 and username.lower() not in _GITHUB_RESERVED_SLUGS:
+                    # Check it is a profile (not a deep repo) URL
+                    # A profile URL has at most one path segment after the username
+                    path_after = url[m.end():].lstrip("/")
+                    if not path_after or "/" not in path_after:
+                        return f"https://github.com/{username}"
 
     if not text.strip():
         return None
@@ -205,7 +245,10 @@ def extract_github(text: str) -> str | None:
 # Public Aggregate API
 # ---------------------------------------------------------------------------
 
-def extract_profiles(text: str) -> dict[str, str | None]:
+def extract_profiles(
+    text: str,
+    extra_urls: list[str] | None = None,
+) -> dict[str, str | None]:
     """
     Extract social and professional profile links from resume text.
 
@@ -213,6 +256,12 @@ def extract_profiles(text: str) -> dict[str, str | None]:
     ----------
     text:
         Cleaned resume text.
+    extra_urls:
+        Optional list of HTTP/HTTPS URLs extracted from embedded hyperlink
+        annotations in the source document (``parser.extract_hyperlinks()``).
+        These are checked *before* scanning the visible text, making it
+        possible to detect profiles that appear only as clickable labels
+        (e.g. a "LinkedIn" icon whose URL is stored as an annotation target).
 
     Returns
     -------
@@ -231,6 +280,6 @@ def extract_profiles(text: str) -> dict[str, str | None]:
         raise TypeError(f"extract_profiles expects a str, got {type(text).__name__!r}.")
 
     return {
-        "linkedin": extract_linkedin(text),
-        "github": extract_github(text),
+        "linkedin": extract_linkedin(text, extra_urls=extra_urls),
+        "github": extract_github(text, extra_urls=extra_urls),
     }

@@ -18,6 +18,9 @@ from docx import Document
 
 from extractor.parser import (
     ParserError,
+    extract_hyperlinks,
+    extract_hyperlinks_from_docx,
+    extract_hyperlinks_from_pdf,
     extract_text,
     extract_text_from_docx,
     extract_text_from_pdf,
@@ -254,8 +257,192 @@ class TestExtractText:
         with pytest.raises(ParserError, match="Could not determine the file format"):
             extract_text(b"some bytes with no format hint")
 
+
     def test_case_insensitive_extension(self):
         """Extensions like .PDF or .Docx should be handled case-insensitively."""
         pdf_bytes = _make_pdf_bytes(["Case insensitive"])
         result = extract_text(pdf_bytes, filename="RESUME.PDF")
         assert "Case insensitive" in result
+
+# ---------------------------------------------------------------------------
+# Hyperlink extraction tests
+# ---------------------------------------------------------------------------
+
+_HYPERLINK_RELTYPE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+)
+
+
+def _make_pdf_with_links(texts: list[str], links: list[str]) -> bytes:
+    """Create a minimal PDF that embeds *links* as URI annotations."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 72), "\n".join(texts), fontsize=12)
+    y = 60
+    for url in links:
+        rect = fitz.Rect(50, y, 300, y + 20)
+        page.insert_link({"kind": fitz.LINK_URI, "from": rect, "uri": url})
+        y += 25
+    result = doc.tobytes()
+    doc.close()
+    return result
+
+
+def _make_docx_with_links(texts: list[str], links: list[str]) -> bytes:
+    """Create a minimal DOCX that embeds *links* as hyperlink relationships."""
+    from lxml import etree
+
+    doc = Document()
+    WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+    for text, url in zip(texts, links):
+        p = doc.add_paragraph()
+        rel_id = doc.part.relate_to(url, _HYPERLINK_RELTYPE, is_external=True)
+        hyperlink = etree.SubElement(p._p, f"{{{WORD_NS}}}hyperlink")
+        hyperlink.set(f"{{{R_NS}}}id", rel_id)
+        r = etree.SubElement(hyperlink, f"{{{WORD_NS}}}r")
+        t = etree.SubElement(r, f"{{{WORD_NS}}}t")
+        t.text = text
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+class TestHyperlinkExtraction:
+    """Tests for extract_hyperlinks_from_pdf / _from_docx / extract_hyperlinks."""
+
+    # -----------------------------------------------------------------------
+    # PDF hyperlink extraction
+    # -----------------------------------------------------------------------
+
+    def test_pdf_linkedin_annotation(self):
+        """LinkedIn URL embedded as PDF annotation is returned."""
+        pdf = _make_pdf_with_links(
+            ["LinkedIn"],
+            ["https://www.linkedin.com/in/johndoe"],
+        )
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert "https://www.linkedin.com/in/johndoe" in result
+
+    def test_pdf_github_annotation(self):
+        """GitHub profile URL embedded as PDF annotation is returned."""
+        pdf = _make_pdf_with_links(
+            ["GitHub"],
+            ["https://github.com/janedoe"],
+        )
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert "https://github.com/janedoe" in result
+
+    def test_pdf_multiple_links(self):
+        """Multiple annotation targets are all returned."""
+        pdf = _make_pdf_with_links(
+            ["LinkedIn", "GitHub"],
+            ["https://linkedin.com/in/alice", "https://github.com/alice123"],
+        )
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert "https://linkedin.com/in/alice" in result
+        assert "https://github.com/alice123" in result
+
+    def test_pdf_no_links_returns_empty_list(self):
+        """PDF with no annotation links returns an empty list."""
+        pdf = _make_pdf_bytes(["No links here"])
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert result == []
+
+    def test_pdf_non_http_links_excluded(self):
+        """mailto: and other non-HTTP URIs are excluded from results."""
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((50, 72), "Email", fontsize=12)
+        page.insert_link(
+            {"kind": fitz.LINK_URI, "from": fitz.Rect(50, 60, 200, 80),
+             "uri": "mailto:test@example.com"}
+        )
+        pdf = doc.tobytes()
+        doc.close()
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert result == []
+
+    def test_pdf_deduplicates_same_url(self):
+        """Duplicate annotation targets are de-duplicated."""
+        url = "https://linkedin.com/in/johndoe"
+        pdf = _make_pdf_with_links(["LinkedIn", "LinkedIn2"], [url, url])
+        result = extract_hyperlinks_from_pdf(pdf)
+        assert result.count(url) == 1
+
+    def test_pdf_invalid_bytes_returns_empty_list(self):
+        """Corrupt / non-PDF bytes return an empty list without raising."""
+        result = extract_hyperlinks_from_pdf(b"not a pdf")
+        assert result == []
+
+    # -----------------------------------------------------------------------
+    # DOCX hyperlink extraction
+    # -----------------------------------------------------------------------
+
+    def test_docx_linkedin_relationship(self):
+        """LinkedIn URL stored as a DOCX relationship is returned."""
+        docx = _make_docx_with_links(
+            ["LinkedIn"],
+            ["https://www.linkedin.com/in/johndoe"],
+        )
+        result = extract_hyperlinks_from_docx(docx)
+        assert "https://www.linkedin.com/in/johndoe" in result
+
+    def test_docx_github_relationship(self):
+        """GitHub URL stored as a DOCX relationship is returned."""
+        docx = _make_docx_with_links(
+            ["GitHub"],
+            ["https://github.com/janedoe"],
+        )
+        result = extract_hyperlinks_from_docx(docx)
+        assert "https://github.com/janedoe" in result
+
+    def test_docx_multiple_links(self):
+        """Multiple DOCX hyperlink relationships are all returned."""
+        docx = _make_docx_with_links(
+            ["LinkedIn", "GitHub"],
+            ["https://linkedin.com/in/bob", "https://github.com/bob99"],
+        )
+        result = extract_hyperlinks_from_docx(docx)
+        assert "https://linkedin.com/in/bob" in result
+        assert "https://github.com/bob99" in result
+
+    def test_docx_no_hyperlinks_returns_empty_list(self):
+        """A plain DOCX with no hyperlinks returns an empty list."""
+        docx = _make_docx_bytes(["No links here"])
+        result = extract_hyperlinks_from_docx(docx)
+        assert result == []
+
+    def test_docx_invalid_bytes_returns_empty_list(self):
+        """Corrupt / non-DOCX bytes return an empty list without raising."""
+        result = extract_hyperlinks_from_docx(b"not a docx")
+        assert result == []
+
+    # -----------------------------------------------------------------------
+    # Unified extract_hyperlinks()
+    # -----------------------------------------------------------------------
+
+    def test_unified_pdf(self):
+        """extract_hyperlinks() dispatches to PDF extractor."""
+        pdf = _make_pdf_with_links(["Link"], ["https://linkedin.com/in/test"])
+        result = extract_hyperlinks(pdf, filename="resume.pdf")
+        assert "https://linkedin.com/in/test" in result
+
+    def test_unified_docx(self):
+        """extract_hyperlinks() dispatches to DOCX extractor."""
+        docx = _make_docx_with_links(["Link"], ["https://github.com/testuser"])
+        result = extract_hyperlinks(docx, filename="resume.docx")
+        assert "https://github.com/testuser" in result
+
+    def test_unified_unknown_format_returns_empty(self):
+        """Unknown file extensions return an empty list without raising."""
+        result = extract_hyperlinks(b"data", filename="resume.txt")
+        assert result == []
+
+    def test_unified_no_filename_returns_empty(self):
+        """Without a filename hint, unknown bytes return an empty list."""
+        result = extract_hyperlinks(b"data")
+        assert result == []
+

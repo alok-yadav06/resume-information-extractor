@@ -8,14 +8,15 @@ the final structured JSON-serialisable dictionary.
 
 Pipeline order:
     1. parser.extract_text()        → raw text from PDF / DOCX
-    2. cleaner.clean_text()         → normalised text
-    3. sections.detect_sections()   → canonical section map
-    4. contact.extract_contact_info() → name, email, phone
-    5. profiles.extract_profiles()  → linkedin, github
-    6. skills.extract_skills()      → deduplicated skills list
-    7. education.extract_education()→ structured education records
-    8. experience.extract_experience() → structured experience records
-    9. Assemble and return structured dictionary
+    2. parser.extract_hyperlinks()  → embedded link annotation URLs
+    3. cleaner.clean_text()         → normalised text
+    4. sections.detect_sections()   → canonical section map
+    5. contact.extract_contact_info() → name, email, phone
+    6. profiles.extract_profiles(extra_urls=...) → linkedin, github
+    7. skills.extract_skills()      → deduplicated skills list
+    8. education.extract_education()→ structured education records
+    9. experience.extract_experience() → structured experience records
+    10. Assemble and return structured dictionary
 
 Output schema:
     {
@@ -43,7 +44,7 @@ from .cleaner import clean_text
 from .contact import extract_contact_info
 from .education import extract_education
 from .experience import extract_experience
-from .parser import FileSource, extract_text
+from .parser import FileSource, extract_hyperlinks, extract_text
 from .profiles import extract_profiles
 from .sections import detect_sections
 from .skills import extract_skills
@@ -94,28 +95,43 @@ def extract_resume(
     TypeError:
         If *source* is not a supported type.
     """
-    # 1. Parse document to raw text
-    raw_text = extract_text(source, filename=filename)
+    # Normalise source to raw bytes once so that stream-based sources (e.g.
+    # Streamlit UploadedFile) are not consumed twice.
+    from .parser import _to_bytes  # private helper — intentional internal use
+    try:
+        source_bytes: bytes = _to_bytes(source)
+    except Exception:
+        source_bytes = source  # type: ignore[assignment]  # let extract_text surface the error
 
-    # 2. Normalise / clean text
+    # 1. Parse document to raw text
+    raw_text = extract_text(source_bytes, filename=filename)
+
+    # 2. Extract embedded hyperlink annotation targets (for profile detection)
+    #    PDF / DOCX files often store LinkedIn / GitHub URLs as clickable
+    #    annotations while showing only a label (e.g. "LinkedIn") in the text.
+    embedded_urls = extract_hyperlinks(source_bytes, filename=filename)
+
+    # 3. Normalise / clean text
     cleaned_text = clean_text(raw_text)
 
-    # 3. Detect logical resume sections
+    # 4. Detect logical resume sections
     sections = detect_sections(cleaned_text)
 
-    # 4. Extract contact information (name, email, phone) from full text
+    # 5. Extract contact information (name, email, phone) from full text
     contact = extract_contact_info(cleaned_text)
 
-    # 5. Extract social / developer profiles (LinkedIn, GitHub)
-    profiles = extract_profiles(cleaned_text)
+    # 6. Extract social / developer profiles (LinkedIn, GitHub)
+    #    Pass embedded_urls so annotation-only URLs are detected even when
+    #    the visible text shows only a label such as "LinkedIn" or "GitHub".
+    profiles = extract_profiles(cleaned_text, extra_urls=embedded_urls)
 
-    # 6. Extract skills (preferring detected skills section)
+    # 7. Extract skills (preferring detected skills section)
     skills = extract_skills(cleaned_text, sections=sections)
 
-    # 7. Extract education records (preferring detected education section)
+    # 8. Extract education records (preferring detected education section)
     education = extract_education(cleaned_text, sections=sections)
 
-    # 8. Extract work experience records (preferring detected experience section)
+    # 9. Extract work experience records (preferring detected experience section)
     experience = extract_experience(cleaned_text, sections=sections)
 
     # 9. Assemble final structured result
