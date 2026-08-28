@@ -4,7 +4,7 @@ tests/test_extractor.py
 Integration tests for the end-to-end resume extraction pipeline.
 
 Tests verify the complete pipeline:
-    parser → cleaner → sections → contact, skills, education, experience → assembled output
+    parser → cleaner → sections → contact, profiles, skills, education, experience → assembled output
 """
 
 from __future__ import annotations
@@ -51,6 +51,8 @@ def _create_docx_bytes(text: str) -> bytes:
 COMPLETE_RESUME_TEXT = """John Doe
 john.doe@example.com
 +91 9876543210
+LinkedIn: https://www.linkedin.com/in/johndoe
+GitHub: https://github.com/johndoe
 
 SKILLS
 Python, Java, Docker, SQL, Git
@@ -81,6 +83,8 @@ Motivated professional looking for exciting opportunities.
 MULTI_SECTION_RESUME_TEXT = """Alex Johnson
 alex.j@example.com
 +1 415 555 2671
+linkedin.com/in/alex-j
+github.com/alexj
 
 SKILLS
 React, Node.js, TypeScript, PostgreSQL
@@ -113,7 +117,10 @@ class TestOutputSchema:
         pdf_bytes = _create_pdf_bytes(COMPLETE_RESUME_TEXT)
         result = extract_resume(pdf_bytes, filename="resume.pdf")
 
-        expected_keys = {"name", "email", "phone", "skills", "education", "experience"}
+        expected_keys = {
+            "name", "email", "phone", "skills", "education", "experience",
+            "linkedin", "github"
+        }
         assert set(result.keys()) == expected_keys
 
     def test_json_serializability(self):
@@ -138,6 +145,8 @@ class TestOutputSchema:
         assert isinstance(result["skills"], list)
         assert isinstance(result["education"], list)
         assert isinstance(result["experience"], list)
+        assert isinstance(result["linkedin"], (str, type(None)))
+        assert isinstance(result["github"], (str, type(None)))
 
 
 # ===========================================================================
@@ -155,6 +164,10 @@ class TestCompleteExtraction:
         assert result["email"] == "john.doe@example.com"
         assert result["phone"] is not None
         assert "9876543210" in result["phone"]
+
+        # Profiles
+        assert result["linkedin"] == "https://www.linkedin.com/in/johndoe"
+        assert result["github"] == "https://github.com/johndoe"
 
         # Skills
         assert "Python" in result["skills"]
@@ -181,6 +194,10 @@ class TestCompleteExtraction:
         assert result["name"] == "John Doe"
         assert result["email"] == "john.doe@example.com"
         assert result["phone"] is not None
+
+        # Profiles
+        assert result["linkedin"] == "https://www.linkedin.com/in/johndoe"
+        assert result["github"] == "https://github.com/johndoe"
 
         # Skills
         assert "Python" in result["skills"]
@@ -209,6 +226,8 @@ class TestPartialResumes:
         assert result["skills"] == []
         assert result["education"] == []
         assert result["experience"] == []
+        assert result["linkedin"] is None
+        assert result["github"] is None
 
     def test_document_with_no_recognizable_fields(self):
         unrecognizable_text = "This is a general document with arbitrary notes and no resume content."
@@ -222,6 +241,8 @@ class TestPartialResumes:
             "skills": [],
             "education": [],
             "experience": [],
+            "linkedin": None,
+            "github": None,
         }
 
     def test_empty_unreadable_pdf_raises_parser_error(self):
@@ -268,6 +289,13 @@ class TestSectionAwareRouting:
         assert "TypeScript" in result["skills"]
         assert "PostgreSQL" in result["skills"]
 
+    def test_profiles_extracted_from_multi_section(self):
+        pdf_bytes = _create_pdf_bytes(MULTI_SECTION_RESUME_TEXT)
+        result = extract_resume(pdf_bytes, filename="multi.pdf")
+
+        assert result["linkedin"] == "https://linkedin.com/in/alex-j"
+        assert result["github"] == "https://github.com/alexj"
+
 
 # ===========================================================================
 # 5. Class Interface (ResumeExtractor)
@@ -282,6 +310,8 @@ class TestResumeExtractorClass:
 
         assert result["name"] == "John Doe"
         assert result["email"] == "john.doe@example.com"
+        assert result["linkedin"] == "https://www.linkedin.com/in/johndoe"
+        assert result["github"] == "https://github.com/johndoe"
 
     def test_classmethod_extract_resume(self):
         pdf_bytes = _create_pdf_bytes(COMPLETE_RESUME_TEXT)
@@ -289,6 +319,8 @@ class TestResumeExtractorClass:
 
         assert result["name"] == "John Doe"
         assert result["email"] == "john.doe@example.com"
+        assert result["linkedin"] == "https://www.linkedin.com/in/johndoe"
+        assert result["github"] == "https://github.com/johndoe"
 
 
 # ===========================================================================

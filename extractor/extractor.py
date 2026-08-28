@@ -11,10 +11,11 @@ Pipeline order:
     2. cleaner.clean_text()         → normalised text
     3. sections.detect_sections()   → canonical section map
     4. contact.extract_contact_info() → name, email, phone
-    5. skills.extract_skills()      → deduplicated skills list
-    6. education.extract_education()→ structured education records
-    7. experience.extract_experience() → structured experience records
-    8. Assemble and return structured dictionary
+    5. profiles.extract_profiles()  → linkedin, github
+    6. skills.extract_skills()      → deduplicated skills list
+    7. education.extract_education()→ structured education records
+    8. experience.extract_experience() → structured experience records
+    9. Assemble and return structured dictionary
 
 Output schema:
     {
@@ -23,7 +24,9 @@ Output schema:
         "phone":       str | None,
         "skills":      list[str],
         "education":   list[dict],
-        "experience":  list[dict]
+        "experience":  list[dict],
+        "linkedin":    str | None,
+        "github":      str | None
     }
 
 Public API:
@@ -41,6 +44,7 @@ from .contact import extract_contact_info
 from .education import extract_education
 from .experience import extract_experience
 from .parser import FileSource, extract_text
+from .profiles import extract_profiles
 from .sections import detect_sections
 from .skills import extract_skills
 
@@ -78,7 +82,9 @@ def extract_resume(
             "phone": str | None,
             "skills": list[str],
             "education": list[dict],
-            "experience": list[dict]
+            "experience": list[dict],
+            "linkedin": str | None,
+            "github": str | None
         }
 
     Raises
@@ -100,16 +106,19 @@ def extract_resume(
     # 4. Extract contact information (name, email, phone) from full text
     contact = extract_contact_info(cleaned_text)
 
-    # 5. Extract skills (preferring detected skills section)
+    # 5. Extract social / developer profiles (LinkedIn, GitHub)
+    profiles = extract_profiles(cleaned_text)
+
+    # 6. Extract skills (preferring detected skills section)
     skills = extract_skills(cleaned_text, sections=sections)
 
-    # 6. Extract education records (preferring detected education section)
+    # 7. Extract education records (preferring detected education section)
     education = extract_education(cleaned_text, sections=sections)
 
-    # 7. Extract work experience records (preferring detected experience section)
+    # 8. Extract work experience records (preferring detected experience section)
     experience = extract_experience(cleaned_text, sections=sections)
 
-    # 8. Assemble final structured result
+    # 9. Assemble final structured result
     return {
         "name": contact.get("name"),
         "email": contact.get("email"),
@@ -117,6 +126,8 @@ def extract_resume(
         "skills": skills,
         "education": education,
         "experience": experience,
+        "linkedin": profiles.get("linkedin"),
+        "github": profiles.get("github"),
     }
 
 

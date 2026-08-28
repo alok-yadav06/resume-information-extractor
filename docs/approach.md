@@ -385,7 +385,31 @@ The caller always receives all three keys:
 {"name": None, "email": None, "phone": None}
 ```
 
-No field is ever omitted from the result dict, and no value is fabricated.
+## 6b. Social & Developer Profiles Extraction (LinkedIn & GitHub)
+
+Performed in `profiles.py`.  ✅ Implemented
+
+### Extraction Strategy
+
+LinkedIn and GitHub profiles are extracted as bonus fields from the cleaned resume text.
+
+- **LinkedIn (`extract_linkedin`)**:
+  - Uses domain-based pattern matching: `linkedin.com/in/<username>`.
+  - Supports labeled formats (`LinkedIn: ...`, `LinkedIn Profile: ...`, `LinkedIn - ...`) and bare URLs.
+  - Normalises URLs to standard `https://...` scheme and strips trailing sentence punctuation (`. , ; ) ]`).
+  - Rejects generic non-profile mentions (e.g. `"Follow us on LinkedIn"`).
+
+- **GitHub (`extract_github`)**:
+  - Uses pattern matching for `github.com/<username>`.
+  - Excludes reserved GitHub non-profile paths (`about`, `pricing`, `features`, `explore`, `topics`, `trending`, `orgs`, `settings`, etc.).
+  - Distinguishes user profile URLs from deep repository links (`github.com/org/repo`), ensuring project repository links are not falsely extracted as candidate profiles.
+  - Supports labeled formats (`GitHub: ...`, `GitHub Profile: ...`) and standalone URLs.
+  - Normalises URLs to `https://github.com/<username>`.
+
+- **Deterministic & Zero Network Calls**:
+  - Profiles are extracted purely via regex and text normalization. No web scraping, network requests, or LinkedIn/GitHub APIs are invoked.
+
+---
 
 ## 7. Skills Extraction
 
@@ -705,7 +729,7 @@ Performed in `extractor.py` via `extract_resume(source, filename=None)` and `Res
 
 ### Architecture Overview
 
-The system processes resumes through a linear, deterministic 8-step pipeline:
+The system processes resumes through a linear, deterministic 9-step pipeline:
 
 ```
 Resume Source (Path / Bytes / Stream)
@@ -720,12 +744,13 @@ Resume Source (Path / Bytes / Stream)
 [3. Section Detection]      → extractor.sections.detect_sections()
   │
   ├───► [4. Contact Extraction]   → extractor.contact.extract_contact_info()
-  ├───► [5. Skills Extraction]    → extractor.skills.extract_skills(sections=...)
-  ├───► [6. Education Extraction] → extractor.education.extract_education(sections=...)
-  └───► [7. Experience Extraction]→ extractor.experience.extract_experience(sections=...)
+  ├───► [5. Profiles Extraction]  → extractor.profiles.extract_profiles()
+  ├───► [6. Skills Extraction]    → extractor.skills.extract_skills(sections=...)
+  ├───► [7. Education Extraction] → extractor.education.extract_education(sections=...)
+  └───► [8. Experience Extraction]→ extractor.experience.extract_experience(sections=...)
   │
   ▼
-[8. Result Assembly]        → Standard JSON-serialisable dictionary
+[9. Result Assembly]        → Standard JSON-serialisable dictionary
 ```
 
 ### 1. Input Handling & Parsing
@@ -741,6 +766,7 @@ Raw text is passed through Unicode NFC normalisation, non-breaking space replace
 
 ### 4. Extraction Routing
 - **Contact Info (`name`, `email`, `phone`)**: Scanned from the full cleaned text to capture header information preceding any section.
+- **Profiles (`linkedin`, `github`)**: Scanned from the full cleaned text to identify social/developer profile URLs.
 - **Skills (`skills`)**: Prefers the isolated `skills` section, resolving aliases against `data/skills.json` and applying boundary-aware regex patterns.
 - **Education (`education`)**: Prefers the isolated `education` section, extracting degrees, institutions, date ranges, and scores.
 - **Work Experience (`experience`)**: Prefers the isolated `experience` section, grouping lines into entries and extracting job titles, companies, date spans, locations, and bullet descriptions.
@@ -775,13 +801,15 @@ The pipeline produces a JSON-serialisable dictionary with a consistent schema:
         "Optimized SQL database queries"
       ]
     }
-  ]
+  ],
+  "linkedin": "https://www.linkedin.com/in/johndoe",
+  "github": "https://github.com/johndoe"
 }
 ```
 
 - If a scalar field is missing or cannot be extracted, it is set to `null` (`None`).
 - If a list field has no matches, it is set to `[]`.
-- Mandatory top-level keys (`name`, `email`, `phone`, `skills`, `education`, `experience`) are always present.
+- Mandatory top-level keys (`name`, `email`, `phone`, `skills`, `education`, `experience`, `linkedin`, `github`) are always present.
 
 ### 6. Error Handling
 - Invalid, corrupted, or unsupported file formats raise `ParserError` with clear user-facing messages.
