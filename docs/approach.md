@@ -699,25 +699,99 @@ key.  First occurrence wins; document order is preserved.
 
 ---
 
-## 10. JSON Generation
+## 10. End-to-End Pipeline & JSON Generation
 
-Assembled in `extractor.py`:
+Performed in `extractor.py` via `extract_resume(source, filename=None)` and `ResumeExtractor`.  ✅ Implemented
+
+### Architecture Overview
+
+The system processes resumes through a linear, deterministic 8-step pipeline:
+
+```
+Resume Source (Path / Bytes / Stream)
+  │
+  ▼
+[1. Document Parsing]       → extractor.parser.extract_text()
+  │
+  ▼
+[2. Text Normalisation]     → extractor.cleaner.clean_text()
+  │
+  ▼
+[3. Section Detection]      → extractor.sections.detect_sections()
+  │
+  ├───► [4. Contact Extraction]   → extractor.contact.extract_contact_info()
+  ├───► [5. Skills Extraction]    → extractor.skills.extract_skills(sections=...)
+  ├───► [6. Education Extraction] → extractor.education.extract_education(sections=...)
+  └───► [7. Experience Extraction]→ extractor.experience.extract_experience(sections=...)
+  │
+  ▼
+[8. Result Assembly]        → Standard JSON-serialisable dictionary
+```
+
+### 1. Input Handling & Parsing
+The pipeline accepts filesystem paths (`str` or `Path`), raw `bytes`, or binary streams (e.g. Streamlit's `UploadedFile`, `io.BytesIO`). Filename extension matching determines the underlying parser:
+- PDF files are parsed via PyMuPDF (`pymupdf`).
+- DOCX files are parsed via `python-docx`.
+
+### 2. Cleaning & Normalisation
+Raw text is passed through Unicode NFC normalisation, non-breaking space replacement, control-character stripping, per-line stripping, and intra-line whitespace collapsing. Original casing and punctuation are preserved.
+
+### 3. Section Detection
+`detect_sections()` identifies canonical headings (`skills`, `education`, `experience`, `projects`, etc.) and isolates their text blocks.
+
+### 4. Extraction Routing
+- **Contact Info (`name`, `email`, `phone`)**: Scanned from the full cleaned text to capture header information preceding any section.
+- **Skills (`skills`)**: Prefers the isolated `skills` section, resolving aliases against `data/skills.json` and applying boundary-aware regex patterns.
+- **Education (`education`)**: Prefers the isolated `education` section, extracting degrees, institutions, date ranges, and scores.
+- **Work Experience (`experience`)**: Prefers the isolated `experience` section, grouping lines into entries and extracting job titles, companies, date spans, locations, and bullet descriptions.
+
+### 5. Final JSON Assembly & Stable Output Schema
+The pipeline produces a JSON-serialisable dictionary with a consistent schema:
 
 ```json
 {
-  "full_name":    "...",
-  "email":        "...",
-  "phone":        "...",
-  "linkedin":     "...",
-  "github":       "...",
-  "skills":       ["..."],
-  "education":    [{ "degree": "...", "institution": "...", "year": "..." }],
-  "experience":   [{ "title": "...", "company": "...", "duration": "..." }]
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "phone": "+91 9876543210",
+  "skills": ["Python", "SQL", "Docker"],
+  "education": [
+    {
+      "degree": "B.Tech in Computer Engineering",
+      "institution": "ABC University",
+      "dates": "2020 - 2024",
+      "field_of_study": "Computer Engineering",
+      "grade": "CGPA: 8.9",
+      "location": null
+    }
+  ],
+  "experience": [
+    {
+      "job_title": "Software Engineer Intern",
+      "company": "XYZ Technologies",
+      "dates": "June 2024 - August 2024",
+      "location": "Mumbai",
+      "description": [
+        "Developed REST APIs using Python and FastAPI",
+        "Optimized SQL database queries"
+      ]
+    }
+  ]
 }
 ```
 
-Fields that cannot be extracted are set to `null` (Python `None`) rather than omitted,
-ensuring consumers always receive a consistent schema.
+- If a scalar field is missing or cannot be extracted, it is set to `null` (`None`).
+- If a list field has no matches, it is set to `[]`.
+- Mandatory top-level keys (`name`, `email`, `phone`, `skills`, `education`, `experience`) are always present.
+
+### 6. Error Handling
+- Invalid, corrupted, or unsupported file formats raise `ParserError` with clear user-facing messages.
+- Empty documents with no selectable text raise `ParserError`.
+- Valid documents with partial or missing resume fields return `null` / `[]` without crashing.
+
+### 7. Deterministic & Local Architecture
+- **Zero External Calls**: No network requests, external APIs, or cloud parsers are invoked.
+- **Zero LLM / GenAI Usage**: The system does NOT use OpenAI, Gemini, Claude, or any generative AI model. All extraction is 100% rule-based and deterministic.
+- **Privacy & Compliance**: Resume content never leaves the local execution environment.
 
 ---
 

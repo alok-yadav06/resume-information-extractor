@@ -176,10 +176,18 @@ def _record_key(rec: dict) -> tuple:
 
 def _is_valid_record(rec: dict) -> bool:
     """
-    A record is valid if it has at least one of: job_title, company, dates.
-    Avoids returning completely empty records.
+    A record is valid if it has a job_title, or both company and dates.
+    An isolated company name with no job title and no dates is not a valid
+    experience record and represents a false positive in fallback mode.
     """
-    return bool(rec.get("job_title") or rec.get("company") or rec.get("dates"))
+    title = rec.get("job_title")
+    company = rec.get("company")
+    dates = rec.get("dates")
+    if title:
+        return True
+    if company and dates:
+        return True
+    return False
 
 
 def _extract_dates(line: str) -> str | None:
