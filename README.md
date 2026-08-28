@@ -1,6 +1,5 @@
 # Resume Information Extraction System
 
-> **Internship Assignment** — deterministic, AI-free resume parsing using Python.
 
 ---
 

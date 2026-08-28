@@ -583,16 +583,119 @@ First occurrence in document order wins.
 - **Fallback precision**: education-like phrases in project or experience
   descriptions may be incorrectly extracted in fallback mode.
 
-## 9. Work Experience Extraction
+Performed in `experience.py`.  ✅ Implemented
 
-Performed in `experience.py`:
+### Section-aware extraction
 
-* Operate on the text block identified as the Experience section.
-* Detect job entries by matching date-range patterns:
-  `MMM YYYY – MMM YYYY`, `MM/YYYY – Present`, etc.
-* Extract company name from the line preceding or following the date range.
-* Extract job title using title-case heuristic on the same or adjacent line.
-* Build a list of experience entries ordered chronologically.
+If `sections["experience"]` is present and non-empty, only that sub-string
+is scanned.  This prevents education entries, project descriptions, and skills
+lists from being misinterpreted as work experience.  Fallback to the full text
+is used only when no experience section is detected.
+
+### Entry boundary detection — two-phase approach
+
+**Phase 1 — blank-line segmentation.**
+The section text is split into *raw blocks* at blank lines.  This handles the
+most common resume format where jobs are separated by empty lines.
+
+**Phase 2 — intra-block splitting.**
+Each raw block is further inspected.  If a block contains a job-title-like
+line that appears *after* a date line, that signals a new entry within the
+same block (no blank line between jobs).  The block is split at that point.
+
+This two-phase strategy correctly handles:
+- standard blank-line-separated multi-job sections
+- tightly-packed single-column layouts
+- entries where only Phase 1 fires (simple single-entry sections)
+
+### Job title identification
+
+A line is classified as a job title if it passes all of:
+1. Length: 3–80 chars, ≤7 words.
+2. Not a date-only line.
+3. Not a bullet line.
+4. Not a degree/education line (`_DEGREE_GUARD_RE`).
+5. Not dominated by commas or pipes (→ skills list).
+6. Contains at least one known job-title keyword (`engineer`, `developer`,
+   `analyst`, `intern`, `manager`, `intern`, `researcher`, etc.).
+7. Does not contain known section-heading or degree words.
+8. ≥55% of characters are alphabetic.
+
+The keyword set is intentionally broad so that novel titles such as
+`"Quantitative Researcher"` or `"Site Reliability Engineer"` are recognised.
+
+### Company identification
+
+A line is classified as a company candidate if it passes:
+1. Length: 2–80 chars, ≤7 words.
+2. Not a date, bullet, or degree line.
+3. Not a comma/pipe-heavy skills line.
+4. ≥45% alphabetic characters.
+5. Either contains a company-keyword (`Technologies`, `Ltd`, `Pvt`, `Inc`,
+   `Solutions`, `Labs`, `Consulting`, etc.) **or** every word starts with
+   an uppercase letter (proper name heuristic).
+
+Within a group, the first non-title candidate is assigned as the company.
+
+### Date detection
+
+`_DATE_SPAN_RE` matches:
+- `"June 2024 - August 2025"`, `"Jan 2023 – Present"`, `"2024 - 2025"`
+- `"01/2023 - 05/2024"`, `"2024–2025"` (en-dash)
+- Bare `"Present"` / `"Current"` as part of a span
+
+`_DATE_ONLY_LINE_RE` identifies lines that contain *only* a date, so they are
+claimed as `dates` immediately and not re-evaluated as company or title lines.
+
+Inline dates embedded in a line (e.g. `"ABC Corp | 2024–2025"`) are extracted
+with `_DATE_SPAN_RE`, removed from the line, and the remainder is re-processed.
+
+### Bullet / description handling
+
+Lines starting with `-`, `•`, `*`, `▪`, `●` are bullet descriptions.  The
+leading marker and surrounding whitespace are stripped.  Cleaned text is
+appended to `record["description"]` as a list of strings.
+
+### Location detection
+
+A line is classified as a location when `_LOCATION_SIGNAL_RE` matches a known
+city/country/state or the word `Remote`.  Location detection is conservative;
+if ambiguous, `None` is returned.  A missing location never discards the entry.
+
+### Inline / pipe-separated formats
+
+`_try_parse_inline` handles compact single-line entries such as:
+`"Software Engineer | ABC Corp | 2024 - 2025"`
+
+### Duplicate handling
+
+Records are de-duplicated by a `(lower(job_title), lower(company), lower(dates))`
+key.  First occurrence wins; document order is preserved.
+
+### False-positive protection
+
+- **Skills lists**: comma/pipe-heavy lines (>2 commas or >2 pipes) are rejected
+  as job title and company candidates.
+- **Degree lines**: `_DEGREE_GUARD_RE` prevents B.Tech / University / etc. from
+  becoming job titles.
+- **Section headings**: words like `SKILLS`, `EDUCATION`, `EXPERIENCE` in
+  `_NOT_TITLE_WORDS` block those lines from being classified as titles.
+- **Prose sentences**: a 10+ word sentence almost never passes the ≤7-word
+  title filter.
+- **Bare dates**: a date-only line with no associated title/company does not
+  create a valid record (`_is_valid_record` requires at least one of
+  job_title / company / dates, but a bare date record is still weak).
+
+### Known limitations
+
+- **Ambiguous title/company order**: if a resume places company before title,
+  the heuristics may assign them in the wrong field.
+- **Non-English resumes**: job-title keywords are English only.
+- **Fallback precision**: experience-like patterns in projects or education may
+  be extracted when no section boundary is available.
+- **Location**: only a small set of known city/country names triggers location
+  detection.  Lesser-known cities are not detected.
+- **Multi-column PDFs**: text extraction order may scramble lines.
 
 ---
 
